@@ -1,0 +1,17 @@
+[general]
+name=KADAS Vantor Open Data
+qgisMinimumVersion=3.0
+qgisMaximumVersion=3.99
+description=Browse and load high-resolution Maxar Open Data satellite imagery in KADAS
+about=KADAS plugin for browsing and loading Maxar Open Data satellite imagery. Features interactive map selection, cloud cover filtering, date range filtering, and direct COG loading. Adapted from qgis-maxar-plugin by Qiusheng Wu.
+version=0.1.0
+author=Michael Lanini
+email=michael@intelligeo.ch
+homepage=https://github.com/mlanini/kadas-vantor-plugin
+tracker=https://github.com/mlanini/kadas-vantor-plugin/issues
+repository=https://github.com/mlanini/kadas-vantor-plugin
+icon=icons/icon.svg
+tags=satellite,imagery,maxar,disaster,open data,cog
+category=Web
+experimental=False
+deprecated=False
