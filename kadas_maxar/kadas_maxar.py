@@ -3,7 +3,10 @@
 from qgis.PyQt.QtCore import Qt, QObject
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox
+from qgis.PyQt.QtNetwork import QNetworkProxy
+from qgis.core import QgsSettings
 import os
+import os as _os_env  # riuso per chiarezza
 
 from kadas.kadasgui import *
 
@@ -32,7 +35,40 @@ class KadasMaxar(QObject):
         self.actions.append(action)
         return action
 
+    def _apply_proxy_settings(self):
+        """Applica le impostazioni proxy definite in KADAS/QGIS a Qt e alle lib HTTP."""
+        settings = QgsSettings()
+        enabled = settings.value("proxy/enabled", False, type=bool)
+        if not enabled:
+            return
+
+        proxy_type = settings.value("proxy/type", "HttpProxy")
+        host = settings.value("proxy/host", "", type=str)
+        port = settings.value("proxy/port", 0, type=int)
+        user = settings.value("proxy/user", "", type=str)
+        password = settings.value("proxy/password", "", type=str)
+        excludes = settings.value("proxy/excludes", "", type=str)
+
+        qt_type_map = {
+            "HttpProxy": QNetworkProxy.HttpProxy,
+            "HttpCachingProxy": QNetworkProxy.HttpCachingProxy,
+            "Socks5Proxy": QNetworkProxy.Socks5Proxy,
+            "FtpCachingProxy": QNetworkProxy.FtpCachingProxy,
+        }
+        qproxy = QNetworkProxy(qt_type_map.get(proxy_type, QNetworkProxy.HttpProxy), host, port, user, password)
+        QNetworkProxy.setApplicationProxy(qproxy)
+
+        # Propaga anche a librerie esterne (es. requests)
+        if host and port:
+            cred = f"{user}:{password}@" if user else ""
+            proxy_url = f"http://{cred}{host}:{port}"
+            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+                _os_env.environ[var] = proxy_url
+            if excludes:
+                _os_env.environ["NO_PROXY"] = excludes
+
     def initGui(self):
+        self._apply_proxy_settings()
         # create menu
         self.menu = QMenu(self.tr("Vantor EO Data"))
 
