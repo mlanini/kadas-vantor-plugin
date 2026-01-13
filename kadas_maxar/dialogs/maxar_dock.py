@@ -145,7 +145,7 @@ except Exception:
 from kadas_maxar.logger import get_logger
 
 # GitHub data sources
-GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/master"
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/refs/heads/master"
 DATASETS_CSV_URL = f"{GITHUB_RAW_URL}/datasets.csv"
 GEOJSON_URL_TEMPLATE = f"{GITHUB_RAW_URL}/datasets/{{event}}.geojson"
 
