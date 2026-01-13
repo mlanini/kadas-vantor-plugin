@@ -58,11 +58,12 @@ class KadasMaxar(QObject):
         qproxy = QNetworkProxy(qt_type_map.get(proxy_type, QNetworkProxy.HttpProxy), host, port, user, password)
         QNetworkProxy.setApplicationProxy(qproxy)
 
-        # Propaga anche a librerie esterne (es. requests)
+        # Propaga anche a librerie esterne (requests/urllib, ecc.)
         if host and port:
+            scheme = "socks5h" if proxy_type.startswith("Socks5") else "http"
             cred = f"{user}:{password}@" if user else ""
-            proxy_url = f"http://{cred}{host}:{port}"
-            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+            proxy_url = f"{scheme}://{cred}{host}:{port}"
+            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
                 _os_env.environ[var] = proxy_url
             if excludes:
                 _os_env.environ["NO_PROXY"] = excludes
