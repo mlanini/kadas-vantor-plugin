@@ -2,7 +2,8 @@
 
 Plugin KADAS per visualizzare e scaricare immagini satellitari ad alta risoluzione dal programma Maxar Open Data.
 
-![KADAS Vantor Plugin](kadas_maxar/icons/icon.svg)
+![KADAS Vantor Plugin](kadas_maxar/icons/icon.svg) 
+Vector icon by [SVG Repo](https://www.svgrepo.com)
 
 ## Caratteristiche
 
