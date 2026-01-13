@@ -1,13 +1,13 @@
 # KADAS Vantor Open Data Plugin
 
-Plugin KADAS per visualizzare e scaricare immagini satellitari ad alta risoluzione dal programma Maxar Open Data.
+Plugin KADAS per visualizzare e scaricare immagini satellitari ad alta risoluzione dal programma Vantor Open Data.
 
 ![KADAS Vantor Plugin](kadas_maxar/icons/icon.svg) 
 Vector icon by [SVG Repo](https://www.svgrepo.com)
 
 ## Caratteristiche
 
-- **Browsing Eventi**: Esplora eventi di disastro naturale con immagini satellitari Maxar disponibili
+- **Browsing Eventi**: Esplora eventi di disastro naturale con immagini satellitari Vantor disponibili
 - **Selezione Interattiva**: Seleziona footprints direttamente dalla mappa con sincronizzazione bidirezionale mappa-tabella
 - **Filtri Avanzati**: Filtra per copertura nuvolosa, intervallo temporale e altre proprietà
 - **Caricamento COG**: Carica immagini come Cloud Optimized GeoTIFF (visual, multispectral, panchromatic)
