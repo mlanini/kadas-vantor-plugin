@@ -182,7 +182,6 @@ MIT License - vedi file LICENSE per dettagli.
 ## Supporto
 
 - Issues: [GitHub Issues](https://github.com/mlanini/kadas-vantor-plugin/issues)
-- Email: michael@intelligeo.ch
 
 ## Screenshot
 
