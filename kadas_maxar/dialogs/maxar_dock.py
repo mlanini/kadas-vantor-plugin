@@ -825,3 +825,74 @@ class MaxarDockWidget(QDockWidget):
             get_logger().error(f"Error loading footprints: {e}", exc_info=True)
             self.status_label.setText(f"Errore caricamento footprints: {e}")
             self.status_label.setStyleSheet("color: red; font-size: 10px;")
+
+    def _on_selection_mode_toggled(self, checked):
+        """Abilita/disabilita la selezione interattiva sulla mappa."""
+        if checked:
+            if self.footprints_layer is not None:
+                if self.selection_tool is None:
+                    self.selection_tool = FootprintSelectionTool(self.iface.mapCanvas(), self.footprints_layer)
+                    self.selection_tool.selectionModeChanged.connect(self.select_from_map_btn.setChecked)
+                self._previous_map_tool = self.iface.mapCanvas().mapTool()
+                self.iface.mapCanvas().setMapTool(self.selection_tool)
+                self.status_label.setText("Modalità selezione da mappa attiva")
+        else:
+            if self.selection_tool and self._previous_map_tool:
+                self.iface.mapCanvas().setMapTool(self._previous_map_tool)
+                self.status_label.setText("Modalità selezione da mappa disattivata")
+
+    def _zoom_to_selected(self):
+        """Zoom sulla selezione corrente nella tabella footprints."""
+        selected_rows = set(idx.row() for idx in self.footprints_table.selectedIndexes())
+        if not selected_rows or self.footprints_layer is None:
+            return
+        selected_ids = []
+        for row in selected_rows:
+            quadkey_item = self.footprints_table.item(row, 5)
+            if quadkey_item:
+                quadkey = quadkey_item.text()
+                fid = self._quadkey_to_feature_id.get(quadkey)
+                if fid is not None:
+                    selected_ids.append(fid)
+        if selected_ids:
+            self.footprints_layer.selectByIds(selected_ids)
+            extent = self.footprints_layer.boundingBoxOfSelected()
+            if extent and extent.isFinite():
+                self.iface.mapCanvas().setExtent(extent)
+                self.iface.mapCanvas().refresh()
+                self.status_label.setText("Zoom effettuato sulla selezione")
+            else:
+                self.status_label.setText("Impossibile calcolare l'estensione della selezione")
+        else:
+            self.status_label.setText("Nessun footprint selezionato")
+
+    def _load_imagery(self, imagery_type):
+        """Carica l'immagine selezionata (visual, ms_analytic, pan_analytic) come COG."""
+        selected_rows = set(idx.row() for idx in self.footprints_table.selectedIndexes())
+        if not selected_rows:
+            QMessageBox.warning(self, "Nessuna selezione", "Seleziona almeno un footprint dalla tabella.")
+            return
+        for row in selected_rows:
+            props = self.all_features[row].get("properties", {})
+            cog_url = props.get(f"{imagery_type}_cog_url")
+            if not cog_url:
+                QMessageBox.warning(self, "Immagine non disponibile", f"Nessun COG {imagery_type} per il footprint selezionato.")
+                continue
+            layer_name = f"{props.get('event_name', 'Event')}_{imagery_type}_{props.get('quadkey', row)}"
+            raster_layer = QgsRasterLayer(cog_url, layer_name, "gdal")
+            if raster_layer.isValid():
+                QgsProject.instance().addMapLayer(raster_layer)
+                self.status_label.setText(f"Immagine {imagery_type} caricata")
+            else:
+                QMessageBox.warning(self, "Errore caricamento", f"Impossibile caricare il COG:\n{cog_url}")
+
+    def _clear_layers(self):
+        """Rimuove tutti i layer caricati dal plugin."""
+        project = QgsProject.instance()
+        layers_to_remove = []
+        for lyr in project.mapLayers().values():
+            if lyr.name().startswith("Event_") or lyr.name().startswith("Vantor") or "COG" in lyr.name() or lyr.name() == "Footprints":
+                layers_to_remove.append(lyr.id())
+        for lid in layers_to_remove:
+            project.removeMapLayer(lid)
+        self.status_label.setText("Tutti i layer caricati sono stati rimossi.")
