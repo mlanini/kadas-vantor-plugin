@@ -283,6 +283,7 @@ class FootprintSelectionTool(QgsMapTool):
 
 
 from qgis.PyQt.QtCore import QUrl, QEventLoop, QByteArray
+from qgis.PyQt.QtNetwork import QNetworkRequest  # <-- AGGIUNGI QUESTA IMPORTAZIONE
 from qgis.core import QgsNetworkAccessManager
 
 class DataFetchWorker(QThread):
@@ -299,7 +300,7 @@ class DataFetchWorker(QThread):
         """Fetch data in background using QGIS network manager (proxy aware)."""
         try:
             nam = QgsNetworkAccessManager.instance()
-            req = QNetworkRequest(QUrl(self.url))  # <-- CORRETTO: QNetworkRequest
+            req = QNetworkRequest(QUrl(self.url))  # <-- ORA QNetworkRequest è definito
             reply = nam.get(req)
             loop = QEventLoop()
             reply.finished.connect(loop.quit)
