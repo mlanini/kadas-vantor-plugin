@@ -711,3 +711,126 @@ class MaxarDockWidget(QDockWidget):
         self._populate_footprints_table(filtered)
         self.status_label.setText(f"Filtrati {len(filtered)} footprints")
         self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+
+    def _on_footprint_selection_changed(self):
+        """Gestisce la selezione delle righe nella tabella footprints."""
+        selected = self.footprints_table.selectedItems()
+        has_selection = bool(selected)
+        self.zoom_btn.setEnabled(has_selection)
+        self.load_visual_btn.setEnabled(has_selection)
+        self.load_ms_btn.setEnabled(has_selection)
+        self.load_pan_btn.setEnabled(has_selection)
+        self.select_from_map_btn.setEnabled(self.footprints_layer is not None)
+        self.status_label.setText(f"Selezionati {len(selected)//self.footprints_table.columnCount()} footprints")
+        self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+
+    def _on_footprints_loaded(self, geojson_str):
+        """Gestisce il caricamento dei footprints (GeoJSON STAC)."""
+        import json
+        self.progress_bar.setVisible(False)
+        self.load_footprints_btn.setEnabled(True)
+        self.apply_filters_btn.setEnabled(True)
+        try:
+            geojson = json.loads(geojson_str)
+            features = geojson.get("features", [])
+            self.all_features = features
+            self._populate_footprints_table(features)
+            self.status_label.setText(f"Caricati {len(features)} footprints")
+            self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+        except Exception as e:
+            self._on_footprints_error(f"Errore parsing GeoJSON: {e}")
+
+    def _on_footprints_error(self, error_msg):
+        """Gestisce errori nel caricamento footprints."""
+        self.progress_bar.setVisible(False)
+        self.load_footprints_btn.setEnabled(True)
+        self.apply_filters_btn.setEnabled(False)
+        self.status_label.setText(f"Errore: {error_msg}")
+        self.status_label.setStyleSheet("color: red; font-size: 10px;")
+        QMessageBox.warning(
+            self,
+            "Errore caricamento footprints",
+            f"Impossibile caricare i footprints:\n\n{error_msg}\n\n"
+            "Verifica la connessione internet e riprova.",
+        )
+
+    def _populate_footprints_table(self, features):
+        """Popola la tabella footprints con le feature fornite."""
+        self.footprints_table.setRowCount(0)
+        for feat in features:
+            props = feat.get("properties", {})
+            row = self.footprints_table.rowCount()
+            self.footprints_table.insertRow(row)
+            self.footprints_table.setItem(row, 0, QTableWidgetItem(props.get("datetime", "")))
+            self.footprints_table.setItem(row, 1, QTableWidgetItem(props.get("platform", "")))
+            self.footprints_table.setItem(row, 2, NumericTableWidgetItem(str(props.get("gsd", ""))))
+            self.footprints_table.setItem(row, 3, NumericTableWidgetItem(str(props.get("cloud_cover", ""))))
+            self.footprints_table.setItem(row, 4, QTableWidgetItem(props.get("catalog_id", "")))
+            self.footprints_table.setItem(row, 5, QTableWidgetItem(props.get("quadkey", "")))
+
+    def _on_selection_mode_toggled(self, checked):
+        """Abilita/disabilita la selezione interattiva sulla mappa."""
+        if checked:
+            if self.footprints_layer is not None:
+                if self.selection_tool is None:
+                    self.selection_tool = FootprintSelectionTool(self.iface.mapCanvas(), self.footprints_layer)
+                    self.selection_tool.selectionModeChanged.connect(self.select_from_map_btn.setChecked)
+                self._previous_map_tool = self.iface.mapCanvas().mapTool()
+                self.iface.mapCanvas().setMapTool(self.selection_tool)
+                self.status_label.setText("Modalità selezione da mappa attiva")
+        else:
+            if self.selection_tool and self._previous_map_tool:
+                self.iface.mapCanvas().setMapTool(self._previous_map_tool)
+                self.status_label.setText("Modalità selezione da mappa disattivata")
+
+    def _zoom_to_selected(self):
+        """Zoom sulla selezione corrente nella tabella footprints."""
+        selected_rows = set(idx.row() for idx in self.footprints_table.selectedIndexes())
+        if not selected_rows or self.footprints_layer is None:
+            return
+        selected_ids = []
+        for row in selected_rows:
+            quadkey = self.footprints_table.item(row, 5).text()
+            fid = self._quadkey_to_feature_id.get(quadkey)
+            if fid is not None:
+                selected_ids.append(fid)
+        if selected_ids:
+            self.footprints_layer.selectByIds(selected_ids)
+            extent = self.footprints_layer.boundingBoxOfSelected()
+            if extent and extent.isFinite():
+                self.iface.mapCanvas().setExtent(extent)
+                self.iface.mapCanvas().refresh()
+                self.status_label.setText("Zoom effettuato sulla selezione")
+            else:
+                self.status_label.setText("Impossibile calcolare l'estensione della selezione")
+
+    def _load_imagery(self, imagery_type):
+        """Carica l'immagine selezionata (visual, ms_analytic, pan_analytic) come COG."""
+        selected_rows = set(idx.row() for idx in self.footprints_table.selectedIndexes())
+        if not selected_rows:
+            QMessageBox.warning(self, "Nessuna selezione", "Seleziona almeno un footprint dalla tabella.")
+            return
+        for row in selected_rows:
+            props = self.all_features[row].get("properties", {})
+            cog_url = props.get(f"{imagery_type}_cog_url")
+            if not cog_url:
+                QMessageBox.warning(self, "Immagine non disponibile", f"Nessun COG {imagery_type} per il footprint selezionato.")
+                continue
+            layer_name = f"{props.get('event_name', 'Event')}_{imagery_type}_{props.get('quadkey', row)}"
+            raster_layer = QgsRasterLayer(cog_url, layer_name, "gdal")
+            if raster_layer.isValid():
+                QgsProject.instance().addMapLayer(raster_layer)
+                self.status_label.setText(f"Immagine {imagery_type} caricata")
+            else:
+                QMessageBox.warning(self, "Errore caricamento", f"Impossibile caricare il COG:\n{cog_url}")
+
+    def _clear_layers(self):
+        """Rimuove tutti i layer caricati dal plugin."""
+        project = QgsProject.instance()
+        layers_to_remove = []
+        for lyr in project.mapLayers().values():
+            if lyr.name().startswith("Event_") or lyr.name().startswith("Vantor") or "COG" in lyr.name():
+                layers_to_remove.append(lyr.id())
+        for lid in layers_to_remove:
+            project.removeMapLayer(lid)
+        self.status_label.setText("Tutti i layer caricati sono stati rimossi.")
