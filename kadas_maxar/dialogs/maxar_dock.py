@@ -635,7 +635,7 @@ class MaxarDockWidget(QDockWidget):
         QMessageBox.warning(
             self,
             "Error Loading Events",
-            f"Failed to load events from GitHub:\n\n{error_msg}\n\n"
+            f"Failed to load events from STAC catalog:\n\n{error_msg}\n\n"
             "Please check your internet connection and try again.",
         )
 
