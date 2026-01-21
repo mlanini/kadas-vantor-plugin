@@ -144,13 +144,8 @@ except Exception:
 
 from kadas_maxar.logger import get_logger
 
-# GitHub data sources
-# GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/refs/heads/master"
-# DATASETS_CSV_URL = f"{GITHUB_RAW_URL}/datasets.csv"
-# GEOJSON_URL_TEMPLATE = f"{GITHUB_RAW_URL}/datasets/{{event}}.geojson"
-
 # Usa solo il catalogo STAC come sorgente eventi:
-DEFAULT_STAC_CATALOG_URL = "https://maxar-opendata.s3.dualstack.us-west-2.amazonaws.com/events/catalog.json"
+DEFAULT_STAC_CATALOG_URL = "https://maxar-opendata.s3.amazonaws.com/events/catalog.json"
 
 
 class FootprintSelectionTool(QgsMapTool):
