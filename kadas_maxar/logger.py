@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import traceback
 
 LOG_LEVELS = {
     "STANDARD": logging.INFO,
@@ -11,11 +12,23 @@ LOG_LEVELS = {
 }
 
 
-def get_logger(level="STANDARD", log_to_console=False):
+class CriticalFileHandler(logging.FileHandler):
+    """
+    FileHandler che scrive stacktrace completo per errori CRITICAL.
+    """
+
+    def emit(self, record):
+        if record.levelno >= logging.CRITICAL and record.exc_info:
+            record.msg = f"{record.msg}\n{''.join(traceback.format_exception(*record.exc_info))}"
+        super().emit(record)
+
+
+def get_logger(level="DEBUG", log_to_console=False):
     """
     Restituisce un logger configurato per il plugin.
     - Scrive su file (percorso da KADAS_MAXAR_LOG o ~/.kadas/maxar.log)
     - Permette diversi livelli di dettaglio ('STANDARD', 'DEBUG', 'ERRORS', 'WARNING', 'CRITICAL')
+    - Logga stacktrace completo per errori CRITICAL
     - Opzionalmente logga anche su console (utile per debug)
     """
     log_path = os.environ.get('KADAS_MAXAR_LOG', os.path.expanduser('~/.kadas/maxar.log'))
@@ -33,9 +46,9 @@ def get_logger(level="STANDARD", log_to_console=False):
     for h in list(logger.handlers):
         logger.removeHandler(h)
 
-    # File handler
+    # File handler con stacktrace per CRITICAL
     try:
-        fh = logging.FileHandler(log_path, mode='a', encoding='utf-8')
+        fh = CriticalFileHandler(log_path, mode='a', encoding='utf-8')
         fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
         fh.setFormatter(fmt)
         logger.addHandler(fh)

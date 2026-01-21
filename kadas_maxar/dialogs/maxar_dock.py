@@ -286,7 +286,7 @@ from qgis.PyQt.QtCore import QUrl, QEventLoop, QByteArray
 from qgis.core import QgsNetworkAccessManager
 
 class DataFetchWorker(QThread):
-    """Worker thread for fetching data from GitHub."""
+    """Worker thread for fetching data from STAC endpoint."""
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -299,8 +299,8 @@ class DataFetchWorker(QThread):
         """Fetch data in background using QGIS network manager (proxy aware)."""
         try:
             nam = QgsNetworkAccessManager.instance()
-            req = QUrl(self.url)
-            reply = nam.get(nam.createRequest(QgsNetworkAccessManager.GetOperation, req, QByteArray()))
+            req = QNetworkRequest(QUrl(self.url))  # <-- CORRETTO: QNetworkRequest
+            reply = nam.get(req)
             loop = QEventLoop()
             reply.finished.connect(loop.quit)
             loop.exec_()
