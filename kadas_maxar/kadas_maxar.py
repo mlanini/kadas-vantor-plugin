@@ -14,6 +14,8 @@ from .logger import get_logger
 import subprocess
 import sys
 
+DEFAULT_STAC_CATALOG_URL = "https://maxar-opendata.s3.dualstack.us-west-2.amazonaws.com/events/catalog.json"
+
 
 class KadasMaxar(QObject):
     """KADAS-compatible wrapper for Maxar Open Data functionality."""
@@ -264,3 +266,49 @@ Contributions are welcome! Please feel free to submit Issues and Pull Requests.<
 
     def show_update_checker(self):
         QMessageBox.information(self.iface.mainWindow(), "Update", "Update checker not implemented yet")
+
+    def _load_events(self):
+        """Carica gli eventi disponibili dai child del catalogo STAC."""
+        self.refresh_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.status_label.setText("Caricamento eventi dal catalogo STAC...")
+        self.status_label.setStyleSheet("color: blue; font-size: 10px;")
+
+        self.fetch_worker = DataFetchWorker(DEFAULT_STAC_CATALOG_URL, data_type="json")
+        self.fetch_worker.finished.connect(self._on_stac_events_loaded)
+        self.fetch_worker.error.connect(self._on_events_error)
+        self.fetch_worker.start()
+
+    def _on_stac_events_loaded(self, catalog_str):
+        """Gestisce il caricamento degli eventi dai child del catalogo STAC."""
+        self.progress_bar.setVisible(False)
+        self.refresh_btn.setEnabled(True)
+
+        import json
+        try:
+            catalog_data = json.loads(catalog_str)
+        except Exception as e:
+            self._on_events_error(f"Impossibile leggere il catalogo STAC: {str(e)}")
+            return
+
+        # Estrai gli eventi dai link di tipo 'child'
+        self.events = []
+        links = catalog_data.get("links", [])
+        for link in links:
+            if link.get("rel") == "child":
+                href = link.get("href")
+                title = link.get("title") or href.split("/")[-1]
+                self.events.append((title, href))
+
+        # Ordina per nome evento
+        self.events.sort(key=lambda x: x[0].lower())
+
+        # Popola la combo box
+        self.event_combo.clear()
+        self.event_combo.addItem("-- Seleziona un evento --", None)
+        for event_name, href in self.events:
+            self.event_combo.addItem(event_name, href)
+
+        self.status_label.setText(f"Caricati {len(self.events)} eventi dal catalogo STAC")
+        self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")

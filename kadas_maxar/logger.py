@@ -1,18 +1,22 @@
 import logging
 import os
+import sys
 
 LOG_LEVELS = {
     "STANDARD": logging.INFO,
     "DEBUG": logging.DEBUG,
     "ERRORS": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "CRITICAL": logging.CRITICAL,
 }
 
 
-def get_logger(level="STANDARD"):
-    """Return a module-level logger writing to the path specified by
-    KADAS_MAXAR_LOG env var or default ~/.kadas/maxar.log.
-    Ensures the directory exists and avoids adding duplicate handlers.
-    Level can be 'STANDARD', 'DEBUG', 'ERRORS'.
+def get_logger(level="STANDARD", log_to_console=False):
+    """
+    Restituisce un logger configurato per il plugin.
+    - Scrive su file (percorso da KADAS_MAXAR_LOG o ~/.kadas/maxar.log)
+    - Permette diversi livelli di dettaglio ('STANDARD', 'DEBUG', 'ERRORS', 'WARNING', 'CRITICAL')
+    - Opzionalmente logga anche su console (utile per debug)
     """
     log_path = os.environ.get('KADAS_MAXAR_LOG', os.path.expanduser('~/.kadas/maxar.log'))
     log_dir = os.path.dirname(log_path)
@@ -20,40 +24,31 @@ def get_logger(level="STANDARD"):
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
     except Exception:
-        logger = logging.getLogger('kadas_maxar')
-        logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
-        return logger
+        pass
 
     logger = logging.getLogger('kadas_maxar')
-    # If handlers already configured, ensure we have a file handler pointing to desired path
+    logger.propagate = False  # Evita doppio logging se root logger è configurato
+
+    # Rimuovi eventuali handler duplicati
+    for h in list(logger.handlers):
+        logger.removeHandler(h)
+
+    # File handler
     try:
-        desired = os.path.abspath(log_path)
-        needs_handler = True
-        for h in list(logger.handlers):
-            try:
-                base = getattr(h, 'baseFilename', None)
-                if base and os.path.abspath(base) == desired:
-                    needs_handler = False
-                    break
-            except Exception:
-                continue
-        if needs_handler:
-            # remove existing file handlers (but keep others)
-            for h in list(logger.handlers):
-                try:
-                    if hasattr(h, 'baseFilename'):
-                        logger.removeHandler(h)
-                except Exception:
-                    pass
-            # add new file handler
-            try:
-                fh = logging.FileHandler(log_path, mode='a', encoding='utf-8')
-                fmt = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-                fh.setFormatter(fmt)
-                logger.addHandler(fh)
-            except Exception:
-                pass
-        logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
+        fh = logging.FileHandler(log_path, mode='a', encoding='utf-8')
+        fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
     except Exception:
-        logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
+        pass
+
+    # Console handler opzionale
+    if log_to_console:
+        ch = logging.StreamHandler(sys.stdout)
+        fmt = logging.Formatter('[%(levelname)s] %(name)s: %(message)s')
+        ch.setFormatter(fmt)
+        logger.addHandler(ch)
+
+    logger.setLevel(LOG_LEVELS.get(level.upper(), logging.INFO))
+    logger.debug(f"Logger inizializzato con livello {level.upper()} (file: {log_path})")
     return logger
