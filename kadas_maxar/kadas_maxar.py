@@ -3,12 +3,16 @@
 from qgis.PyQt.QtCore import Qt, QObject
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox
-from qgis.PyQt.QtNetwork import QNetworkProxy
+from qgis.PyQt.QtNetwork import QNetworkProxy, QNetworkProxyFactory
 from qgis.core import QgsSettings
 import os
 import os as _os_env  # riuso per chiarezza
+import socket
 
 from kadas.kadasgui import *
+from .logger import get_logger
+import subprocess
+import sys
 
 
 class KadasMaxar(QObject):
@@ -22,6 +26,9 @@ class KadasMaxar(QObject):
         self.menu = None
         self._maxar_dock = None
         self._settings_dock = None
+        # Imposta livello di log desiderato: "STANDARD", "DEBUG", "ERRORS"
+        self.log = get_logger(level="STANDARD")
+        self.log.info("Logger inizializzato (livello: STANDARD)")
 
     def add_action(self, icon_path, text, callback, add_to_menu=True, status_tip=None, checkable=False, parent=None):
         icon = QIcon(icon_path)
@@ -36,10 +43,13 @@ class KadasMaxar(QObject):
         return action
 
     def _apply_proxy_settings(self):
-        """Applica le impostazioni proxy definite in KADAS/QGIS a Qt e alle lib HTTP."""
+        """Applica le impostazioni proxy definite in KADAS/QGIS a Qt e alle lib HTTP, come in kadas-albireo2."""
         settings = QgsSettings()
         enabled = settings.value("proxy/enabled", False, type=bool)
         if not enabled:
+            # Usa i proxy di sistema se configurati
+            QNetworkProxyFactory.setUseSystemConfiguration(True)
+            self.log.info("Proxy disabilitato: uso configurazione di sistema")
             return
 
         proxy_type = settings.value("proxy/type", "HttpProxy")
@@ -57,6 +67,8 @@ class KadasMaxar(QObject):
         }
         qproxy = QNetworkProxy(qt_type_map.get(proxy_type, QNetworkProxy.HttpProxy), host, port, user, password)
         QNetworkProxy.setApplicationProxy(qproxy)
+        QNetworkProxyFactory.setUseSystemConfiguration(False)
+        self.log.info(f"Proxy applicato: {proxy_type}://{host}:{port}")
 
         # Propaga anche a librerie esterne (requests/urllib, ecc.)
         if host and port:
@@ -68,6 +80,30 @@ class KadasMaxar(QObject):
             if excludes:
                 _os_env.environ["NO_PROXY"] = excludes
 
+        # VPN detection (come in kadas-albireo2)
+        try:
+            # Esempio: verifica se una VPN è attiva controllando l'interfaccia di default
+            gw = socket.gethostbyname(socket.gethostname())
+            if gw.startswith("10.") or gw.startswith("172.") or gw.startswith("192.168."):
+                self.log.info("Connessione probabilmente NON tramite VPN (rete privata rilevata)")
+            else:
+                self.log.info("Connessione probabilmente tramite VPN o pubblica")
+        except Exception as e:
+            self.log.warning(f"Impossibile determinare lo stato VPN: {e}")
+
+    def open_log_window(self):
+        """Apre il file di log con l'editor di testo di sistema."""
+        log_path = os.environ.get('KADAS_MAXAR_LOG', os.path.expanduser('~/.kadas/maxar.log'))
+        try:
+            if sys.platform.startswith('win'):
+                os.startfile(log_path)
+            elif sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', log_path])
+            else:
+                subprocess.Popen(['xdg-open', log_path])
+        except Exception as e:
+            QMessageBox.warning(self.iface.mainWindow(), "Errore apertura log", f"Impossibile aprire il file di log:\n{e}")
+
     def initGui(self):
         self._apply_proxy_settings()
         # create menu
@@ -78,6 +114,7 @@ class KadasMaxar(QObject):
         main_icon = os.path.join(icon_base, "icon.svg")
         settings_icon = os.path.join(icon_base, "settings.svg")
         about_icon = os.path.join(icon_base, "about.svg")
+        log_icon = os.path.join(icon_base, "log.svg") if os.path.exists(os.path.join(icon_base, "log.svg")) else None
 
         # Add panel actions
         self.maxar_action = self.add_action(
@@ -95,6 +132,16 @@ class KadasMaxar(QObject):
             self.toggle_settings_dock,
             status_tip=self.tr("Toggle Settings Panel"),
             checkable=True,
+            parent=self.iface.mainWindow(),
+        )
+
+        # Log window opener
+        self.add_action(
+            log_icon,
+            self.tr("Apri file di log"),
+            self.open_log_window,
+            add_to_menu=True,
+            status_tip=self.tr("Visualizza il file di log del plugin"),
             parent=self.iface.mainWindow(),
         )
 

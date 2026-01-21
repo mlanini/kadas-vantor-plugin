@@ -1,11 +1,18 @@
 import logging
 import os
 
+LOG_LEVELS = {
+    "STANDARD": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "ERRORS": logging.ERROR,
+}
 
-def get_logger():
+
+def get_logger(level="STANDARD"):
     """Return a module-level logger writing to the path specified by
     KADAS_MAXAR_LOG env var or default ~/.kadas/maxar.log.
     Ensures the directory exists and avoids adding duplicate handlers.
+    Level can be 'STANDARD', 'DEBUG', 'ERRORS'.
     """
     log_path = os.environ.get('KADAS_MAXAR_LOG', os.path.expanduser('~/.kadas/maxar.log'))
     log_dir = os.path.dirname(log_path)
@@ -13,9 +20,8 @@ def get_logger():
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
     except Exception:
-        # best-effort: if we can't create dir, return a silent logger
         logger = logging.getLogger('kadas_maxar')
-        logger.setLevel(logging.INFO)
+        logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
         return logger
 
     logger = logging.getLogger('kadas_maxar')
@@ -47,7 +53,7 @@ def get_logger():
                 logger.addHandler(fh)
             except Exception:
                 pass
-        logger.setLevel(logging.INFO)
+        logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
     except Exception:
-        logger.setLevel(logging.INFO)
+        logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
     return logger
