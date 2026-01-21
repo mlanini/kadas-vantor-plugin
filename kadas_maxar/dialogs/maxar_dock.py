@@ -401,14 +401,24 @@ class MaxarDockWidget(QDockWidget):
         filter_group.setStyleSheet("QGroupBox { color: #ffffff; font-weight: bold; }")
         filter_layout = QFormLayout(filter_group)
 
-        # Max cloud cover
+        # Max cloud cover (SLIDER)
         cloud_label = QLabel("Max Cloud Cover:")
         cloud_label.setStyleSheet("color: #f0f0f0; font-weight: 500;")
-        self.cloud_spin = QSpinBox()
-        self.cloud_spin.setRange(0, 100)
-        self.cloud_spin.setValue(100)
-        self.cloud_spin.setSuffix(" %")
-        filter_layout.addRow(cloud_label, self.cloud_spin)
+        from qgis.PyQt.QtWidgets import QSlider
+        self.cloud_slider = QSlider(Qt.Horizontal)
+        self.cloud_slider.setRange(0, 100)
+        self.cloud_slider.setValue(100)
+        self.cloud_slider.setTickInterval(10)
+        self.cloud_slider.setTickPosition(QSlider.TicksBelow)
+        self.cloud_slider.setToolTip("Max cloud cover (%)")
+        self.cloud_slider.setMinimumWidth(120)
+        self.cloud_slider.valueChanged.connect(lambda v: self.cloud_value_label.setText(f"{v} %"))
+        self.cloud_value_label = QLabel("100 %")
+        self.cloud_value_label.setStyleSheet("color: #f0f0f0; font-size: 10px;")
+        cloud_slider_layout = QHBoxLayout()
+        cloud_slider_layout.addWidget(self.cloud_slider)
+        cloud_slider_layout.addWidget(self.cloud_value_label)
+        filter_layout.addRow(cloud_label, cloud_slider_layout)
 
         # Date filter checkbox
         self.date_check = QCheckBox("Filter by date range")
@@ -584,7 +594,14 @@ class MaxarDockWidget(QDockWidget):
         for link in links:
             if link.get("rel") == "child":
                 href = link.get("href")
-                title = link.get("title") or href.split("/")[-1]
+                # Estrai il nome della cartella che contiene "collection.json"
+                # Esempio: .../events/2023-turkey-earthquake/collection.json -> "2023-turkey-earthquake"
+                parts = href.rstrip("/").split("/")
+                if len(parts) >= 2 and parts[-1] == "collection.json":
+                    folder_name = parts[-2].replace("-", " ").replace("_", " ").title()
+                else:
+                    folder_name = href.split("/")[-1]
+                title = link.get("title") or folder_name
                 self.events.append((title, href))
 
         # Ordina per nome evento
@@ -645,6 +662,7 @@ class MaxarDockWidget(QDockWidget):
         event_href = self.event_combo.currentData()
         self.load_footprints_btn.setEnabled(event_href is not None)
         self.apply_filters_btn.setEnabled(False)
+        self.footprints_layer = None  # Reset layer quando cambi evento
         if event_href:
             self.status_label.setText(f"Selezionato: {self.event_combo.currentText()}")
             self.status_label.setStyleSheet("color: gray; font-size: 10px;")
@@ -685,8 +703,7 @@ class MaxarDockWidget(QDockWidget):
 
     def _apply_current_filters(self):
         """Applica i filtri selezionati alla tabella dei footprints."""
-        # Esempio base: filtra per copertura nuvolosa e intervallo date se attivi
-        max_cloud = self.cloud_spin.value()
+        max_cloud = self.cloud_slider.value()
         use_date = self.date_check.isChecked()
         start_date = self.start_date_edit.date().toPyDate() if use_date else None
         end_date = self.end_date_edit.date().toPyDate() if use_date else None
@@ -738,6 +755,24 @@ class MaxarDockWidget(QDockWidget):
             self._populate_footprints_table(features)
             self.status_label.setText(f"Caricati {len(features)} footprints")
             self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+            # Crea il layer footprints (se serve per selezione da mappa)
+            if features:
+                # Crea un layer temporaneo per la selezione da mappa
+                from qgis.core import QgsVectorLayer, QgsProject
+                import tempfile
+                layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "Footprints", "memory")
+                pr = layer.dataProvider()
+                for feat in features:
+                    geom = feat.get("geometry")
+                    props = feat.get("properties", {})
+                    # ...crea QgsFeature da geom e props...
+                    # (implementa conversione GeoJSON -> QgsFeature)
+                QgsProject.instance().addMapLayer(layer)
+                self.footprints_layer = layer
+                self.select_from_map_btn.setEnabled(True)
+            else:
+                self.footprints_layer = None
+                self.select_from_map_btn.setEnabled(False)
         except Exception as e:
             self._on_footprints_error(f"Errore parsing GeoJSON: {e}")
 
