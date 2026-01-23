@@ -444,13 +444,13 @@ class MaxarDockWidget(QDockWidget):
         load_btn_layout = QHBoxLayout()
         self.load_footprints_btn = QPushButton("Load Footprints")
         self.load_footprints_btn.clicked.connect(self._load_footprints)
-        self.load_footprints_btn.setEnabled(False)
+        self.load_footprints_btn.setEnabled(True)
         load_btn_layout.addWidget(self.load_footprints_btn)
         
         # Apply filters button
         self.apply_filters_btn = QPushButton("Apply Filters")
         self.apply_filters_btn.clicked.connect(self._apply_current_filters)
-        self.apply_filters_btn.setEnabled(False)
+        self.apply_filters_btn.setEnabled(True)
         load_btn_layout.addWidget(self.apply_filters_btn)
         
         layout.addLayout(load_btn_layout)
@@ -508,13 +508,13 @@ class MaxarDockWidget(QDockWidget):
         self.select_from_map_btn.setCheckable(True)
         self.select_from_map_btn.setToolTip("Click on map to select footprints. Ctrl+Click for multiple selection.")
         self.select_from_map_btn.toggled.connect(self._on_selection_mode_toggled)
-        self.select_from_map_btn.setEnabled(False)
+        self.select_from_map_btn.setEnabled(True)
         actions_inner.addWidget(self.select_from_map_btn)
 
         # Zoom button
         self.zoom_btn = QPushButton("Zoom to Selected")
         self.zoom_btn.clicked.connect(self._zoom_to_selected)
-        self.zoom_btn.setEnabled(False)
+        self.zoom_btn.setEnabled(True)
         actions_inner.addWidget(self.zoom_btn)
 
         # Load imagery buttons
@@ -523,19 +523,19 @@ class MaxarDockWidget(QDockWidget):
         self.load_visual_btn = QPushButton("Load Visual")
         self.load_visual_btn.setToolTip("Load visual (RGB) imagery as COG")
         self.load_visual_btn.clicked.connect(lambda: self._load_imagery("visual"))
-        self.load_visual_btn.setEnabled(False)
+        self.load_visual_btn.setEnabled(True)
         imagery_layout.addWidget(self.load_visual_btn)
 
         self.load_ms_btn = QPushButton("Load MS")
         self.load_ms_btn.setToolTip("Load multispectral imagery as COG")
         self.load_ms_btn.clicked.connect(lambda: self._load_imagery("ms_analytic"))
-        self.load_ms_btn.setEnabled(False)
+        self.load_ms_btn.setEnabled(True)
         imagery_layout.addWidget(self.load_ms_btn)
 
         self.load_pan_btn = QPushButton("Load Pan")
         self.load_pan_btn.setToolTip("Load panchromatic imagery as COG")
         self.load_pan_btn.clicked.connect(lambda: self._load_imagery("pan_analytic"))
-        self.load_pan_btn.setEnabled(False)
+        self.load_pan_btn.setEnabled(True)
         imagery_layout.addWidget(self.load_pan_btn)
 
         actions_inner.addLayout(imagery_layout)
@@ -560,7 +560,7 @@ class MaxarDockWidget(QDockWidget):
 
     def _load_events(self):
         """Carica gli eventi disponibili dai child del catalogo STAC."""
-        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setEnabled(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.status_label.setText("Caricamento eventi dal catalogo STAC...")
@@ -656,7 +656,7 @@ class MaxarDockWidget(QDockWidget):
         """Gestisce la selezione di un evento."""
         event_href = self.event_combo.currentData()
         self.load_footprints_btn.setEnabled(event_href is not None)
-        self.apply_filters_btn.setEnabled(False)
+        self.apply_filters_btn.setEnabled(True)
         self.footprints_layer = None  # Reset layer quando cambi evento
         if event_href:
             self.status_label.setText(f"Selezionato: {self.event_combo.currentText()}")
@@ -685,7 +685,7 @@ class MaxarDockWidget(QDockWidget):
         if not event_href:
             return
 
-        self.load_footprints_btn.setEnabled(False)
+        self.load_footprints_btn.setEnabled(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.status_label.setText(f"Caricamento footprints per {self.event_combo.currentText()}...")
