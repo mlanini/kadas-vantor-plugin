@@ -45,13 +45,18 @@ class KadasMaxar(QObject):
         return action
 
     def _apply_proxy_settings(self):
-        """Applica le impostazioni proxy definite in KADAS/QGIS a Qt e alle lib HTTP, come in kadas-albireo2."""
+        """Applica le impostazioni proxy definite in KADAS/QGIS a Qt e alle librerie HTTP."""
         settings = QgsSettings()
         enabled = settings.value("proxy/enabled", False, type=bool)
         if not enabled:
             # Usa i proxy di sistema se configurati
             QNetworkProxyFactory.setUseSystemConfiguration(True)
+            QNetworkProxy.setApplicationProxy(QNetworkProxy(QNetworkProxy.NoProxy))
             self.log.info("Proxy disabilitato: uso configurazione di sistema")
+            # Rimuovi eventuali variabili d'ambiente proxy
+            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"):
+                if var in _os_env.environ:
+                    del _os_env.environ[var]
             return
 
         proxy_type = settings.value("proxy/type", "HttpProxy")
@@ -81,10 +86,14 @@ class KadasMaxar(QObject):
                 _os_env.environ[var] = proxy_url
             if excludes:
                 _os_env.environ["NO_PROXY"] = excludes
+        else:
+            # Rimuovi variabili d'ambiente se host/port non validi
+            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"):
+                if var in _os_env.environ:
+                    del _os_env.environ[var]
 
         # VPN detection (come in kadas-albireo2)
         try:
-            # Esempio: verifica se una VPN è attiva controllando l'interfaccia di default
             gw = socket.gethostbyname(socket.gethostname())
             if gw.startswith("10.") or gw.startswith("172.") or gw.startswith("192.168."):
                 self.log.info("Connessione probabilmente NON tramite VPN (rete privata rilevata)")
