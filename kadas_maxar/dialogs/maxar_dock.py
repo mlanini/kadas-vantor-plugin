@@ -843,21 +843,21 @@ class MaxarDockWidget(QDockWidget):
             self.status_label.setText(f"Errore caricamento footprints: {e}")
             self.status_label.setStyleSheet("color: red; font-size: 10px;")
 
-        def _on_footprints_error(self, error_msg):
-            """Gestisce errori nel caricamento footprints."""
-            self.progress_bar.setVisible(False)
-            self.load_footprints_btn.setEnabled(True)
-            self.apply_filters_btn.setEnabled(False)
-            self.status_label.setText(f"Errore: {error_msg}")
-            self.status_label.setStyleSheet("color: red; font-size: 10px;")
-            QMessageBox.warning(
-                self,
-                "Errore caricamento footprints",
-                f"Impossibile caricare i footprints:\n\n{error_msg}\n\n"
-                "Verifica la connessione internet e riprova.",
-            )
-        
-        def _on_selection_mode_toggled(self, checked):
+    def _on_footprints_error(self, error_msg):
+        """Gestisce errori nel caricamento footprints."""
+        self.progress_bar.setVisible(False)
+        self.load_footprints_btn.setEnabled(True)
+        self.apply_filters_btn.setEnabled(False)
+        self.status_label.setText(f"Errore: {error_msg}")
+        self.status_label.setStyleSheet("color: red; font-size: 10px;")
+        QMessageBox.warning(
+            self,
+            "Errore caricamento footprints",
+            f"Impossibile caricare i footprints:\n\n{error_msg}\n\n"
+            "Verifica la connessione internet e riprova.",
+        )
+
+    def _on_selection_mode_toggled(self, checked):
         """Abilita/disabilita la selezione interattiva sulla mappa."""
         if checked:
             if self.footprints_layer is not None:
