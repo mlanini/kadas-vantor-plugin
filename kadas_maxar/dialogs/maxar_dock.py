@@ -737,6 +737,28 @@ class MaxarDockWidget(QDockWidget):
         self.status_label.setText(f"Selezionati {len(selected)//self.footprints_table.columnCount()} footprints")
         self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
 
+    def _populate_footprints_table(self, features):
+        """Popola la tabella footprints con le feature fornite."""
+        self.footprints_table.setRowCount(0)
+        for feat in features:
+            props = feat.get("properties", {})
+            row = self.footprints_table.rowCount()
+            self.footprints_table.insertRow(row)
+            # Data
+            self.footprints_table.setItem(row, 0, QTableWidgetItem(props.get("datetime", "")))
+            # Platform
+            self.footprints_table.setItem(row, 1, QTableWidgetItem(props.get("platform", "")))
+            # GSD
+            gsd = props.get("gsd", "")
+            self.footprints_table.setItem(row, 2, NumericTableWidgetItem(str(gsd) if gsd is not None else ""))
+            # Cloud cover
+            cloud = props.get("cloud_cover", "")
+            self.footprints_table.setItem(row, 3, NumericTableWidgetItem(str(cloud) if cloud is not None else ""))
+            # Catalog ID
+            self.footprints_table.setItem(row, 4, QTableWidgetItem(props.get("catalog_id", "")))
+            # Quadkey
+            self.footprints_table.setItem(row, 5, QTableWidgetItem(props.get("quadkey", "")))
+
     def _on_footprints_loaded(self, geojson_str):
         """Gestisce il caricamento dei footprints (GeoJSON STAC)."""
         import json
