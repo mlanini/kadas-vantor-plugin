@@ -48,15 +48,20 @@ class KadasMaxar(QObject):
         """Applica le impostazioni proxy definite in KADAS/QGIS a Qt e alle librerie HTTP."""
         settings = QgsSettings()
         enabled = settings.value("proxy/enabled", False, type=bool)
+        proxy_vars = (
+            "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+            "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"
+        )
+
         if not enabled:
-            # Usa i proxy di sistema se configurati
             QNetworkProxyFactory.setUseSystemConfiguration(True)
             QNetworkProxy.setApplicationProxy(QNetworkProxy(QNetworkProxy.NoProxy))
             self.log.info("Proxy disabilitato: uso configurazione di sistema")
-            # Rimuovi eventuali variabili d'ambiente proxy
-            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"):
+            # Rimuovi tutte le variabili d'ambiente proxy
+            for var in proxy_vars:
                 if var in _os_env.environ:
                     del _os_env.environ[var]
+                    self.log.debug(f"Variabile d'ambiente rimossa: {var}")
             return
 
         proxy_type = settings.value("proxy/type", "HttpProxy")
@@ -75,24 +80,30 @@ class KadasMaxar(QObject):
         qproxy = QNetworkProxy(qt_type_map.get(proxy_type, QNetworkProxy.HttpProxy), host, port, user, password)
         QNetworkProxy.setApplicationProxy(qproxy)
         QNetworkProxyFactory.setUseSystemConfiguration(False)
-        self.log.info(f"Proxy applicato: {proxy_type}://{host}:{port}")
+        self.log.info(f"Proxy applicato: {proxy_type}://{host}:{port} (user: {user})")
 
         # Propaga anche a librerie esterne (requests/urllib, ecc.)
         if host and port:
             scheme = "socks5h" if proxy_type.startswith("Socks5") else "http"
             cred = f"{user}:{password}@" if user else ""
             proxy_url = f"{scheme}://{cred}{host}:{port}"
-            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+            for var in proxy_vars:
+                if var.lower().startswith("no_proxy"):
+                    continue
                 _os_env.environ[var] = proxy_url
+                self.log.debug(f"Variabile d'ambiente impostata: {var}={proxy_url}")
             if excludes:
                 _os_env.environ["NO_PROXY"] = excludes
+                _os_env.environ["no_proxy"] = excludes
+                self.log.debug(f"NO_PROXY impostato: {excludes}")
         else:
             # Rimuovi variabili d'ambiente se host/port non validi
-            for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"):
+            for var in proxy_vars:
                 if var in _os_env.environ:
                     del _os_env.environ[var]
+                    self.log.debug(f"Variabile d'ambiente rimossa: {var}")
 
-        # VPN detection (come in kadas-albireo2)
+        # VPN detection (come in kadas-albireo2 e swisstopo)
         try:
             gw = socket.gethostbyname(socket.gethostname())
             if gw.startswith("10.") or gw.startswith("172.") or gw.startswith("192.168."):
