@@ -142,10 +142,13 @@ except Exception:
         def __init__(self, symbol):
             self.symbol = symbol
 
+import json
 from kadas_maxar.logger import get_logger
 
-# Usa solo il catalogo STAC come sorgente eventi:
-DEFAULT_STAC_CATALOG_URL = "https://maxar-opendata.s3.amazonaws.com/events/catalog.json"
+# GitHub URLs per i dati Maxar Open Data (stesso pattern del plugin originale)
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/master"
+DATASETS_CSV_URL = f"{GITHUB_RAW_URL}/datasets.csv"
+GEOJSON_URL_TEMPLATE = f"{GITHUB_RAW_URL}/datasets/{{event}}.geojson"
 
 
 class FootprintSelectionTool(QgsMapTool):
@@ -277,8 +280,8 @@ class FootprintSelectionTool(QgsMapTool):
         get_logger().info("Footprint selection tool deactivated")
 
 
-from qgis.PyQt.QtCore import QUrl, QEventLoop, QByteArray
-from qgis.PyQt.QtNetwork import QNetworkRequest  # <-- AGGIUNGI QUESTA IMPORTAZIONE
+from qgis.PyQt.QtCore import QUrl, QEventLoop, QByteArray, QTimer
+from qgis.PyQt.QtNetwork import QNetworkRequest
 from qgis.core import QgsNetworkAccessManager
 
 class DataFetchWorker(QThread):
@@ -286,26 +289,88 @@ class DataFetchWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, url, data_type="text"):
+    def __init__(self, url, data_type="text", timeout=120):
         super().__init__()
         self.url = url
         self.data_type = data_type
+        self.timeout = timeout
 
     def run(self):
         """Fetch data in background using QGIS network manager (proxy aware)."""
         try:
+            # Validazione URL prima di procedere
+            if not self.url:
+                raise Exception("URL is empty or None")
+            
+            if not isinstance(self.url, str):
+                raise Exception(f"URL must be a string, got {type(self.url)}")
+            
+            if not self.url.startswith(('http://', 'https://')):
+                raise Exception(f"Invalid URL protocol. URL must start with http:// or https://, got: {self.url}")
+            
+            get_logger().info(f"Fetching STAC data from: {self.url}")
+            
             nam = QgsNetworkAccessManager.instance()
-            req = QNetworkRequest(QUrl(self.url))  # <-- ORA QNetworkRequest è definito
+            req = QNetworkRequest(QUrl(self.url))
+            
+            # Configura headers per compatibilità
+            req.setRawHeader(b"User-Agent", b"KADAS-Vantor-Plugin/0.1.0")
+            req.setAttribute(QNetworkRequest.CacheLoadControlAttribute, QNetworkRequest.AlwaysNetwork)
+            
+            get_logger().debug(f"Network request created for: {req.url().toString()}")
+            
             reply = nam.get(req)
             loop = QEventLoop()
             reply.finished.connect(loop.quit)
+            
+            # Timeout timer
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(loop.quit)
+            timer.start(self.timeout * 1000)
+            
+            get_logger().debug(f"Waiting for network response (timeout: {self.timeout}s)...")
             loop.exec_()
+            
+            # Verifica timeout
+            if not reply.isFinished():
+                reply.abort()
+                error_msg = f"Request timeout after {self.timeout} seconds"
+                get_logger().error(error_msg)
+                raise Exception(error_msg)
+            
+            # Verifica errori di rete
             if reply.error():
-                raise Exception(reply.errorString())
+                error_code = reply.error()
+                error_msg = reply.errorString()
+                status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+                
+                detailed_error = f"Network error ({error_code}): {error_msg}"
+                if status_code:
+                    detailed_error += f" - HTTP {status_code}"
+                
+                get_logger().error(f"{detailed_error} for URL: {self.url}")
+                raise Exception(detailed_error)
+            
+            # Verifica status code HTTP
+            status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            get_logger().debug(f"HTTP Status Code: {status_code}")
+            
+            if status_code and status_code >= 400:
+                error_msg = f"HTTP error {status_code} from {self.url}"
+                get_logger().error(error_msg)
+                raise Exception(error_msg)
+            
+            # Leggi i dati
             data = reply.readAll().data().decode('utf-8')
+            get_logger().info(f"Successfully fetched {len(data)} bytes from STAC endpoint")
+            
             self.finished.emit(data)
+            
         except Exception as e:
-            self.error.emit(str(e))
+            error_msg = str(e)
+            get_logger().error(f"Error in DataFetchWorker: {error_msg}", exc_info=True)
+            self.error.emit(error_msg)
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -559,60 +624,28 @@ class MaxarDockWidget(QDockWidget):
         layout.addWidget(self.status_label)
 
     def _load_events(self):
-        """Carica gli eventi disponibili dai child del catalogo STAC."""
-        self.refresh_btn.setEnabled(True)
+        """Carica gli eventi disponibili da GitHub (CSV)."""
+        self.refresh_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        self.status_label.setText("Caricamento eventi dal catalogo STAC...")
+        self.status_label.setText("Caricamento eventi...")
         self.status_label.setStyleSheet("color: blue; font-size: 10px;")
 
-        self.fetch_worker = DataFetchWorker(DEFAULT_STAC_CATALOG_URL, data_type="json")
-        self.fetch_worker.finished.connect(self._on_stac_events_loaded)
+        # Ottieni timeout dalle impostazioni (default 120 secondi)
+        timeout = self.settings.value("MaxarOpenData/timeout", 120, type=int)
+        
+        # Migrazione: se timeout è ancora il vecchio default (30), usa il nuovo (120)
+        if timeout == 30:
+            timeout = 120
+            get_logger().info(f"Migrated old timeout (30s) to new default (120s)")
+        
+        self.fetch_worker = DataFetchWorker(DATASETS_CSV_URL, data_type="text", timeout=timeout)
+        self.fetch_worker.finished.connect(self._on_events_loaded)
         self.fetch_worker.error.connect(self._on_events_error)
         self.fetch_worker.start()
 
-    def _on_stac_events_loaded(self, catalog_str):
-        """Gestisce il caricamento degli eventi dai child del catalogo STAC."""
-        self.progress_bar.setVisible(False)
-        self.refresh_btn.setEnabled(True)
-
-        import json
-        try:
-            catalog_data = json.loads(catalog_str)
-        except Exception as e:
-            self._on_events_error(f"Impossibile leggere il catalogo STAC: {str(e)}")
-            return
-
-        # Estrai gli eventi dai link di tipo 'child'
-        self.events = []
-        links = catalog_data.get("links", [])
-        for link in links:
-            if link.get("rel") == "child":
-                href = link.get("href")
-                # Estrai il nome della cartella che contiene "collection.json"
-                # Esempio: .../events/2023-turkey-earthquake/collection.json -> "2023-turkey-earthquake"
-                parts = href.rstrip("/").split("/")
-                if len(parts) >= 2 and parts[-1] == "collection.json":
-                    folder_name = parts[-2].replace("-", " ").replace("_", " ").title()
-                else:
-                    folder_name = href.split("/")[-1]
-                title = link.get("title") or folder_name
-                self.events.append((title, href))
-
-        # Ordina per nome evento
-        self.events.sort(key=lambda x: x[0].lower())
-
-        # Popola la combo box
-        self.event_combo.clear()
-        self.event_combo.addItem("-- Seleziona un evento --", None)
-        for event_name, href in self.events:
-            self.event_combo.addItem(event_name, href)
-
-        self.status_label.setText(f"Caricati {len(self.events)} eventi dal catalogo STAC")
-        self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
-
     def _on_events_loaded(self, csv_content):
-        """Handle successful events loading."""
+        """Gestisce il caricamento eventi da CSV GitHub."""
         self.progress_bar.setVisible(False)
         self.refresh_btn.setEnabled(True)
 
@@ -631,11 +664,11 @@ class MaxarDockWidget(QDockWidget):
 
         # Populate combo box
         self.event_combo.clear()
-        self.event_combo.addItem("-- Select an event --", None)
+        self.event_combo.addItem("-- Seleziona un evento --", None)
         for event_name, count in self.events:
             self.event_combo.addItem(f"{event_name} ({count} tiles)", event_name)
 
-        self.status_label.setText(f"Loaded {len(self.events)} events")
+        self.status_label.setText(f"Caricati {len(self.events)} eventi")
         self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
 
     def _on_events_error(self, error_msg):
@@ -647,18 +680,18 @@ class MaxarDockWidget(QDockWidget):
 
         QMessageBox.warning(
             self,
-            "Error Loading Events",
-            f"Failed to load events from STAC catalog:\n\n{error_msg}\n\n"
-            "Please check your internet connection and try again.",
+            "Errore caricamento eventi",
+            f"Impossibile caricare gli eventi da GitHub:\n\n{error_msg}\n\n"
+            "Verifica la connessione internet e riprova.",
         )
 
     def _on_event_changed(self, index):
         """Gestisce la selezione di un evento."""
-        event_href = self.event_combo.currentData()
-        self.load_footprints_btn.setEnabled(event_href is not None)
+        event_name = self.event_combo.currentData()
+        self.load_footprints_btn.setEnabled(event_name is not None)
         self.apply_filters_btn.setEnabled(True)
         self.footprints_layer = None  # Reset layer quando cambi evento
-        if event_href:
+        if event_name:
             self.status_label.setText(f"Selezionato: {self.event_combo.currentText()}")
             self.status_label.setStyleSheet("color: gray; font-size: 10px;")
     
@@ -680,18 +713,30 @@ class MaxarDockWidget(QDockWidget):
         self.footprints_table.sortItems(column, new_order)
 
     def _load_footprints(self):
-        """Carica i footprints per l'evento selezionato (GeoJSON STAC)."""
-        event_href = self.event_combo.currentData()
-        if not event_href:
+        """Carica i footprints per l'evento selezionato da GitHub GeoJSON."""
+        event_name = self.event_combo.currentData()
+        if not event_name:
             return
 
-        self.load_footprints_btn.setEnabled(True)
+        self.load_footprints_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        self.status_label.setText(f"Caricamento footprints per {self.event_combo.currentText()}...")
+        self.status_label.setText(f"Caricamento footprints per {event_name}...")
         self.status_label.setStyleSheet("color: blue; font-size: 10px;")
 
-        self.fetch_worker = DataFetchWorker(event_href, data_type="json")
+        # Costruisci URL GeoJSON
+        url = GEOJSON_URL_TEMPLATE.format(event=event_name)
+        get_logger().info(f"Loading footprints from: {url}")
+        
+        # Ottieni timeout dalle impostazioni (default 180 secondi per i GeoJSON grandi)
+        timeout = self.settings.value("MaxarOpenData/timeout", 180, type=int)
+        
+        # Migrazione: se timeout è ancora il vecchio default (30), usa il nuovo (180)
+        if timeout == 30:
+            timeout = 180
+            get_logger().info(f"Migrated old timeout (30s) to new default for footprints (180s)")
+        
+        self.fetch_worker = DataFetchWorker(url, data_type="json", timeout=timeout)
         self.fetch_worker.finished.connect(self._on_footprints_loaded)
         self.fetch_worker.error.connect(self._on_footprints_error)
         self.fetch_worker.start()
@@ -727,6 +772,9 @@ class MaxarDockWidget(QDockWidget):
 
     def _on_footprint_selection_changed(self):
         """Gestisce la selezione delle righe nella tabella footprints."""
+        if self._updating_selection:
+            return
+            
         selected = self.footprints_table.selectedItems()
         has_selection = bool(selected)
         self.zoom_btn.setEnabled(has_selection)
@@ -736,6 +784,48 @@ class MaxarDockWidget(QDockWidget):
         self.select_from_map_btn.setEnabled(self.footprints_layer is not None)
         self.status_label.setText(f"Selezionati {len(selected)//self.footprints_table.columnCount()} footprints")
         self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+        
+        # Sincronizza selezione → layer
+        if self.footprints_layer:
+            selected_rows = set(idx.row() for idx in self.footprints_table.selectedIndexes())
+            selected_fids = []
+            for row in selected_rows:
+                quadkey_item = self.footprints_table.item(row, 5)
+                if quadkey_item:
+                    quadkey = quadkey_item.text()
+                    fid = self._quadkey_to_feature_id.get(quadkey)
+                    if fid is not None:
+                        selected_fids.append(fid)
+            
+            self._updating_selection = True
+            self.footprints_layer.selectByIds(selected_fids)
+            self._updating_selection = False
+
+    def _on_layer_selection_changed(self):
+        """Gestisce la selezione nel layer (mappa → tabella)."""
+        if self._updating_selection or not self.footprints_layer:
+            return
+        
+        self._updating_selection = True
+        try:
+            # Ottieni gli ID delle feature selezionate
+            selected_fids = self.footprints_layer.selectedFeatureIds()
+            
+            # Converti in quadkeys
+            selected_quadkeys = set()
+            for fid in selected_fids:
+                quadkey = self._feature_id_to_quadkey.get(fid)
+                if quadkey:
+                    selected_quadkeys.add(quadkey)
+            
+            # Seleziona le righe corrispondenti nella tabella
+            self.footprints_table.clearSelection()
+            for row in range(self.footprints_table.rowCount()):
+                quadkey_item = self.footprints_table.item(row, 5)
+                if quadkey_item and quadkey_item.text() in selected_quadkeys:
+                    self.footprints_table.selectRow(row)
+        finally:
+            self._updating_selection = False
 
     def _populate_footprints_table(self, features):
         """Popola la tabella footprints con le feature fornite."""
@@ -759,89 +849,163 @@ class MaxarDockWidget(QDockWidget):
             # Quadkey
             self.footprints_table.setItem(row, 5, QTableWidgetItem(props.get("quadkey", "")))
 
-    def _on_footprints_loaded(self, geojson_str):
-        """Gestisce il caricamento dei footprints (GeoJSON STAC)."""
-        import json
+    def _on_footprints_loaded(self, geojson_data):
+        """Gestisce il caricamento dei footprints da GitHub GeoJSON."""
         self.progress_bar.setVisible(False)
         self.load_footprints_btn.setEnabled(True)
         self.apply_filters_btn.setEnabled(True)
+        
+        # Parse JSON string to dict
         try:
-            geojson = json.loads(geojson_str)
-            features = geojson.get("features", [])
-            self.all_features = features
-            self._populate_footprints_table(features)
-            self.status_label.setText(f"Caricati {len(features)} footprints")
-            self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
-            # Crea il layer footprints (se serve per selezione da mappa)
-            if features:
-                # Crea un layer temporaneo per la selezione da mappa
-                from qgis.core import QgsVectorLayer, QgsProject, QgsFeature, QgsGeometry, QgsFields, QgsField
-                from qgis.PyQt.QtCore import QVariant
-
-                # Crea un layer temporaneo per footprints
-                layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "Footprints", "memory")
-                pr = layer.dataProvider()
-
-                # Definisci i campi
-                fields = QgsFields()
-                fields.append(QgsField("datetime", QVariant.String))
-                fields.append(QgsField("platform", QVariant.String))
-                fields.append(QgsField("gsd", QVariant.Double))
-                fields.append(QgsField("cloud_cover", QVariant.Double))
-                fields.append(QgsField("catalog_id", QVariant.String))
-                fields.append(QgsField("quadkey", QVariant.String))
-                pr.addAttributes(fields)
-                layer.updateFields()
-
-                self._feature_id_to_quadkey = {}
-                self._quadkey_to_feature_id = {}
-
-                for feat in features:
-                    props = feat.get("properties", {})
-                    geom = feat.get("geometry", {})
-                    if geom and geom.get("type") == "Polygon":
-                        qgs_geom = QgsGeometry.fromPolygonXY([
-                            [QgsGeometry.fromPointXY(QgsPointXY(*pt)).asPoint() for pt in geom.get("coordinates", [])[0]]
-                        ])
-                    elif geom and geom.get("type") == "MultiPolygon":
-                        qgs_geom = QgsGeometry.fromMultiPolygonXY([
-                            [QgsGeometry.fromPointXY(QgsPointXY(*pt)).asPoint() for pt in poly] for poly in geom.get("coordinates", [])
-                        ])
-                    else:
-                        qgs_geom = None
-
-                    if qgs_geom:
-                        feature = QgsFeature()
-                        feature.setGeometry(qgs_geom)
-                        # Imposta i valori dei campi
-                        for field in fields:
-                            field_name = field.name()
-                            if field_name in props:
-                                feature.setAttribute(field_name, props[field_name])
-                        pr.addFeature(feature)
-
-                        # Mappa gli ID delle feature ai quadkey (per selezione da mappa)
-                        fid = feature.id()
-                        quadkey = props.get("quadkey")
-                        if quadkey:
-                            self._feature_id_to_quadkey[fid] = quadkey
-                            self._quadkey_to_feature_id[quadkey] = fid
-
-                # Aggiungi il layer al progetto (se non esiste già)
-                if not QgsProject.instance().mapLayersByName("Footprints"):
-                    QgsProject.instance().addMapLayer(layer)
-
-                self.footprints_layer = layer
-                get_logger().info(f"Footprints layer created with {len(features)} features")
-            else:
-                get_logger().warning("No features found in GeoJSON")
-        except Exception as e:
-            self.progress_bar.setVisible(False)
-            self.load_footprints_btn.setEnabled(True)
-            self.apply_filters_btn.setEnabled(True)
-            get_logger().error(f"Error loading footprints: {e}", exc_info=True)
-            self.status_label.setText(f"Errore caricamento footprints: {e}")
+            geojson_dict = json.loads(geojson_data) if isinstance(geojson_data, str) else geojson_data
+        except json.JSONDecodeError as e:
+            get_logger().error(f"Failed to parse GeoJSON: {e}")
+            self.status_label.setText("Errore: GeoJSON non valido")
             self.status_label.setStyleSheet("color: red; font-size: 10px;")
+            return
+        
+        self.current_geojson = geojson_dict
+        features = geojson_dict.get("features", [])
+        
+        self.all_features = features
+        self._populate_footprints_table(features)
+        self.status_label.setText(f"Caricati {len(features)} footprints")
+        self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+        
+        # Crea il layer footprints (se serve per selezione da mappa)
+        if features:
+            # Crea un layer temporaneo per la selezione da mappa
+            from qgis.core import (
+                QgsVectorLayer, QgsProject, QgsFeature, QgsGeometry, 
+                QgsFields, QgsField, QgsPointXY
+            )
+            from qgis.PyQt.QtCore import QVariant
+
+            # Crea un layer temporaneo per footprints
+            layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "Footprints", "memory")
+            pr = layer.dataProvider()
+
+            # Definisci i campi
+            fields = QgsFields()
+            fields.append(QgsField("datetime", QVariant.String))
+            fields.append(QgsField("platform", QVariant.String))
+            fields.append(QgsField("gsd", QVariant.Double))
+            fields.append(QgsField("cloud_cover", QVariant.Double))
+            fields.append(QgsField("catalog_id", QVariant.String))
+            fields.append(QgsField("quadkey", QVariant.String))
+            pr.addAttributes(fields)
+            layer.updateFields()
+
+            self._feature_id_to_quadkey = {}
+            self._quadkey_to_feature_id = {}
+
+            for feat in features:
+                props = feat.get("properties", {})
+                geom = feat.get("geometry", {})
+                qgs_geom = None
+                
+                if geom and geom.get("type") == "Polygon":
+                    # Coordinates format: [[[lon, lat], [lon, lat], ...]]
+                    coords = geom.get("coordinates", [])
+                    if coords and len(coords) > 0:
+                        # Outer ring
+                        points = [QgsPointXY(pt[0], pt[1]) for pt in coords[0]]
+                        qgs_geom = QgsGeometry.fromPolygonXY([points])
+                        
+                elif geom and geom.get("type") == "MultiPolygon":
+                    # Coordinates format: [[[[lon, lat], [lon, lat], ...]], ...]
+                    coords = geom.get("coordinates", [])
+                    polygons = []
+                    for polygon in coords:
+                        if polygon and len(polygon) > 0:
+                            # Outer ring of each polygon
+                            points = [QgsPointXY(pt[0], pt[1]) for pt in polygon[0]]
+                            polygons.append([points])
+                    if polygons:
+                        qgs_geom = QgsGeometry.fromMultiPolygonXY(polygons)
+
+                if qgs_geom:
+                    feature = QgsFeature(fields)  # Inizializza con i campi
+                    feature.setGeometry(qgs_geom)
+                    
+                    # Imposta i valori dei campi usando gli indici
+                    feature.setAttribute("datetime", props.get("datetime", ""))
+                    feature.setAttribute("platform", props.get("platform", ""))
+                    feature.setAttribute("gsd", props.get("gsd", 0.0))
+                    feature.setAttribute("cloud_cover", props.get("cloud_cover", 0.0))
+                    feature.setAttribute("catalog_id", props.get("catalog_id", ""))
+                    feature.setAttribute("quadkey", props.get("quadkey", ""))
+                    
+                    pr.addFeature(feature)
+
+                    # Mappa gli ID delle feature ai quadkey (per selezione da mappa)
+                    fid = feature.id()
+                    quadkey = props.get("quadkey")
+                    if quadkey:
+                        self._feature_id_to_quadkey[fid] = quadkey
+                        self._quadkey_to_feature_id[quadkey] = fid
+
+            # Update layer extent
+            layer.updateExtents()
+            
+            # Apply styling to layer
+            from qgis.core import QgsSimpleFillSymbolLayer, QgsFillSymbol
+            from qgis.PyQt.QtGui import QColor
+            
+            symbol = QgsFillSymbol.createSimple({
+                'color': '0,255,191,50',  # Semi-transparent cyan
+                'outline_color': '0,255,191,255',  # Solid cyan border
+                'outline_width': '0.5'
+            })
+            layer.renderer().setSymbol(symbol)
+            
+            # Rimuovi layer precedente se esiste
+            existing_layers = QgsProject.instance().mapLayersByName("Footprints")
+            for existing_layer in existing_layers:
+                QgsProject.instance().removeMapLayer(existing_layer.id())
+            
+            # Invalida selection tool perché il vecchio layer è stato rimosso
+            if self.selection_tool is not None:
+                self.selection_tool = None
+            
+            # Aggiungi il nuovo layer al progetto
+            QgsProject.instance().addMapLayer(layer)
+            
+            # Connetti selezione layer → tabella
+            layer.selectionChanged.connect(self._on_layer_selection_changed)
+            
+            # Zoom to layer extent if auto_zoom enabled
+            auto_zoom = self.settings.value("MaxarOpenData/auto_zoom", True, type=bool)
+            if auto_zoom and layer.extent().isFinite():
+                from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform
+                
+                # Ottieni extent del layer (in WGS84)
+                layer_extent = layer.extent()
+                
+                # Trasforma da WGS84 al CRS del canvas
+                source_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+                dest_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+                
+                if source_crs.isValid() and dest_crs.isValid() and source_crs != dest_crs:
+                    try:
+                        transform = QgsCoordinateTransform(source_crs, dest_crs, QgsProject.instance())
+                        transformed_extent = transform.transformBoundingBox(layer_extent)
+                        self.iface.mapCanvas().setExtent(transformed_extent)
+                        get_logger().debug(f"Auto-zoom: transformed extent from {layer_extent.toString()} to {transformed_extent.toString()}")
+                    except Exception as e:
+                        get_logger().error(f"Failed to transform extent for auto-zoom: {e}")
+                        # Fallback: usa extent non trasformato
+                        self.iface.mapCanvas().setExtent(layer_extent)
+                else:
+                    self.iface.mapCanvas().setExtent(layer_extent)
+                
+                self.iface.mapCanvas().refresh()
+            
+            self.footprints_layer = layer
+            get_logger().info(f"Footprints layer created with {len(features)} features")
+            get_logger().debug(f"Layer extent: {layer.extent().toString()}")
+        else:
+            get_logger().warning("No features found in GeoJSON")
 
     def _on_footprints_error(self, error_msg):
         """Gestisce errori nel caricamento footprints."""
@@ -861,9 +1025,10 @@ class MaxarDockWidget(QDockWidget):
         """Abilita/disabilita la selezione interattiva sulla mappa."""
         if checked:
             if self.footprints_layer is not None:
-                if self.selection_tool is None:
-                    self.selection_tool = FootprintSelectionTool(self.iface.mapCanvas(), self.footprints_layer)
-                    self.selection_tool.selectionModeChanged.connect(self.select_from_map_btn.setChecked)
+                # Ricrea sempre il tool per evitare problemi con layer rimossi/ricreati
+                self.selection_tool = FootprintSelectionTool(self.iface.mapCanvas(), self.footprints_layer)
+                self.selection_tool.selectionModeChanged.connect(self.select_from_map_btn.setChecked)
+                
                 self._previous_map_tool = self.iface.mapCanvas().mapTool()
                 self.iface.mapCanvas().setMapTool(self.selection_tool)
                 self.status_label.setText("Modalità selezione da mappa attiva")
@@ -873,29 +1038,93 @@ class MaxarDockWidget(QDockWidget):
                 self.status_label.setText("Modalità selezione da mappa disattivata")
 
     def _zoom_to_selected(self):
-        """Zoom sulla selezione corrente nella tabella footprints."""
+        """Zoom sulla selezione corrente nella tabella footprints.
+        
+        Supporta qualsiasi sistema di riferimento del map canvas tramite PROJ.
+        Le coordinate GeoJSON (WGS84/EPSG:4326) vengono automaticamente trasformate
+        nel CRS del canvas usando QgsCoordinateTransform che si basa su PROJ.
+        
+        Sistemi di riferimento supportati (esempi):
+        - EPSG:4326 (WGS84) - Geographic
+        - EPSG:3857 (Web Mercator) - Google Maps, OpenStreetMap
+        - EPSG:2056 (CH1903+ / LV95) - Switzerland
+        - EPSG:3395 (World Mercator)
+        - EPSG:32632 (WGS84 / UTM zone 32N)
+        - Qualsiasi altro CRS supportato da PROJ
+        """
         selected_rows = set(idx.row() for idx in self.footprints_table.selectedIndexes())
-        if not selected_rows or self.footprints_layer is None:
-            return
-        selected_ids = []
-        for row in selected_rows:
-            quadkey_item = self.footprints_table.item(row, 5)
-            if quadkey_item:
-                quadkey = quadkey_item.text()
-                fid = self._quadkey_to_feature_id.get(quadkey)
-                if fid is not None:
-                    selected_ids.append(fid)
-        if selected_ids:
-            self.footprints_layer.selectByIds(selected_ids)
-            extent = self.footprints_layer.boundingBoxOfSelected()
-            if extent and extent.isFinite():
-                self.iface.mapCanvas().setExtent(extent)
-                self.iface.mapCanvas().refresh()
-                self.status_label.setText("Zoom effettuato sulla selezione")
-            else:
-                self.status_label.setText("Impossibile calcolare l'estensione della selezione")
-        else:
+        if not selected_rows:
             self.status_label.setText("Nessun footprint selezionato")
+            return
+            
+        # Calcola bounding box dalle geometrie originali (in WGS84)
+        min_x = min_y = float("inf")
+        max_x = max_y = float("-inf")
+        
+        for row in selected_rows:
+            if row < len(self.all_features):
+                feature = self.all_features[row]
+                geom = feature.get("geometry", {})
+                coords = geom.get("coordinates", [])
+                
+                if coords:
+                    # Per Polygon o MultiPolygon
+                    if geom.get("type") == "Polygon":
+                        for point in coords[0]:  # Primo anello
+                            min_x = min(min_x, point[0])
+                            max_x = max(max_x, point[0])
+                            min_y = min(min_y, point[1])
+                            max_y = max(max_y, point[1])
+                    elif geom.get("type") == "MultiPolygon":
+                        for polygon in coords:
+                            for point in polygon[0]:  # Primo anello di ogni poligono
+                                min_x = min(min_x, point[0])
+                                max_x = max(max_x, point[0])
+                                min_y = min(min_y, point[1])
+                                max_y = max(max_y, point[1])
+        
+        if min_x != float("inf"):
+            from qgis.core import QgsRectangle, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject
+            
+            # Crea extent in WGS84 (EPSG:4326)
+            extent_wgs84 = QgsRectangle(min_x, min_y, max_x, max_y)
+            
+            # Ottieni CRS sorgente (GeoJSON è sempre WGS84) e destinazione (canvas)
+            source_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            dest_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+            
+            get_logger().debug(f"Zoom: WGS84 extent = {extent_wgs84.toString()}")
+            get_logger().debug(f"Source CRS: {source_crs.authid()} - {source_crs.description()}")
+            get_logger().debug(f"Dest CRS: {dest_crs.authid()} - {dest_crs.description()}")
+            
+            # Trasforma coordinate se necessario (usa PROJ internamente)
+            if source_crs.isValid() and dest_crs.isValid() and source_crs != dest_crs:
+                try:
+                    # QgsCoordinateTransform usa PROJ per supportare qualsiasi CRS
+                    transform = QgsCoordinateTransform(source_crs, dest_crs, QgsProject.instance())
+                    extent = transform.transformBoundingBox(extent_wgs84)
+                    get_logger().debug(f"Transformed extent = {extent.toString()}")
+                except Exception as e:
+                    get_logger().error(f"Failed to transform coordinates: {e}")
+                    # Fallback: usa extent WGS84 non trasformato
+                    extent = extent_wgs84
+                    self.status_label.setText(f"Avviso: impossibile trasformare coordinate da {source_crs.authid()} a {dest_crs.authid()}")
+                    self.status_label.setStyleSheet("color: orange; font-size: 10px;")
+            else:
+                extent = extent_wgs84
+                if not source_crs.isValid():
+                    get_logger().warning("Source CRS (EPSG:4326) is not valid")
+                if not dest_crs.isValid():
+                    get_logger().warning(f"Destination CRS is not valid: {dest_crs.authid()}")
+            
+            # Applica zoom
+            self.iface.mapCanvas().setExtent(extent)
+            self.iface.mapCanvas().refresh()
+            self.status_label.setText("Zoom effettuato sulla selezione")
+            self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+        else:
+            self.status_label.setText("Impossibile calcolare l'estensione della selezione")
+            self.status_label.setStyleSheet("color: orange; font-size: 10px;")
 
     def _load_imagery(self, imagery_type):
         """Carica l'immagine selezionata (visual, ms_analytic, pan_analytic) come COG."""
@@ -903,19 +1132,57 @@ class MaxarDockWidget(QDockWidget):
         if not selected_rows:
             QMessageBox.warning(self, "Nessuna selezione", "Seleziona almeno un footprint dalla tabella.")
             return
+            
+        imagery_label = imagery_type.replace("_", " ").title()
+        
+        loaded_count = 0
+        not_available_count = 0
+        
         for row in selected_rows:
-            props = self.all_features[row].get("properties", {})
-            cog_url = props.get(f"{imagery_type}_cog_url")
-            if not cog_url:
-                QMessageBox.warning(self, "Immagine non disponibile", f"Nessun COG {imagery_type} per il footprint selezionato.")
+            if row >= len(self.all_features):
                 continue
-            layer_name = f"{props.get('event_name', 'Event')}_{imagery_type}_{props.get('quadkey', row)}"
-            raster_layer = QgsRasterLayer(cog_url, layer_name, "gdal")
+                
+            feature = self.all_features[row]
+            props = feature.get("properties", {})
+            
+            # Il GeoJSON ha campi "visual", "ms_analytic", "pan_analytic" (senza _cog_url)
+            cog_url = props.get(imagery_type)
+            
+            if not cog_url:
+                not_available_count += 1
+                get_logger().debug(f"No {imagery_type} URL for quadkey {props.get('quadkey')}")
+                continue
+                
+            # Costruisci nome layer
+            catalog_id = props.get("catalog_id", "unknown")
+            quadkey = props.get("quadkey", "")
+            date = props.get("datetime", "")[:10] if props.get("datetime") else "no-date"
+            layer_name = f"Maxar {imagery_type} - {catalog_id} - {quadkey} ({date})"
+            
+            # Carica COG con GDAL vsicurl
+            cog_path = f"/vsicurl/{cog_url}"
+            raster_layer = QgsRasterLayer(cog_path, layer_name, "gdal")
+            
             if raster_layer.isValid():
                 QgsProject.instance().addMapLayer(raster_layer)
-                self.status_label.setText(f"Immagine {imagery_type} caricata")
+                loaded_count += 1
+                get_logger().info(f"Loaded COG: {layer_name}")
             else:
+                get_logger().error(f"Failed to load COG: {cog_url}")
                 QMessageBox.warning(self, "Errore caricamento", f"Impossibile caricare il COG:\n{cog_url}")
+        
+        if loaded_count > 0:
+            self.status_label.setText(f"Caricate {loaded_count} immagini {imagery_label}")
+            self.status_label.setStyleSheet("color: #00ffbf; font-size: 10px;")
+        elif not_available_count > 0:
+            QMessageBox.warning(
+                self, 
+                "Immagini non disponibili", 
+                f"{imagery_label} non disponibile per i footprints selezionati.\n"
+                f"Questo evento potrebbe avere solo immagini Visual."
+            )
+            self.status_label.setText(f"{imagery_label} non disponibile")
+            self.status_label.setStyleSheet("color: orange; font-size: 10px;")
 
     def _clear_layers(self):
         """Rimuove tutti i layer caricati dal plugin."""

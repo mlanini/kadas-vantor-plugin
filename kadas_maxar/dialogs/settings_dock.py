@@ -317,8 +317,8 @@ class SettingsDockWidget(QDockWidget):
         # Timeout
         self.timeout_spin = QSpinBox()
         try:
-            self.timeout_spin.setRange(5, 300)
-            self.timeout_spin.setValue(30)
+            self.timeout_spin.setRange(5, 600)
+            self.timeout_spin.setValue(180)
             self.timeout_spin.setSuffix(" seconds")
         except Exception:
             pass
@@ -418,7 +418,7 @@ class SettingsDockWidget(QDockWidget):
             
             # Advanced
             self.timeout_spin.setValue(
-                self.settings.value(f"{self.SETTINGS_PREFIX}timeout", 30, type=int)
+                self.settings.value(f"{self.SETTINGS_PREFIX}timeout", 180, type=int)
             )
             self.max_downloads_spin.setValue(
                 self.settings.value(f"{self.SETTINGS_PREFIX}max_downloads", 3, type=int)
@@ -467,7 +467,7 @@ class SettingsDockWidget(QDockWidget):
             self.show_labels_check.setChecked(False)
             
             # Advanced
-            self.timeout_spin.setValue(30)
+            self.timeout_spin.setValue(180)
             self.max_downloads_spin.setValue(3)
             self.debug_check.setChecked(False)
             self.show_urls_check.setChecked(False)
