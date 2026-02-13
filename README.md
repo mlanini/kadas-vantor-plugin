@@ -160,7 +160,7 @@ See [CHANGELOG.md](CHANGELOG.md) for complete change history.
 
 Based on [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin) by Qiusheng Wu.
 
-Adapted for KADAS by Michael Lanini ([Intelligeo](https://www.intelligeo.ch)).
+Adapted for KADAS by Michael Lanini.
 
 Data provided by [Vantor Open Data Program](https://www.maxar.com/open-data) (formerly Maxar).
 

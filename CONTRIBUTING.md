@@ -141,6 +141,6 @@ By contributing to the project, you agree that your code will be released under 
 ## Contact
 
 - Issues: [GitHub Issues](https://github.com/mlanini/kadas-vantor-plugin/issues)
-- Email: [Intelligeo](https://www.intelligeo.ch)
+- Email: mlanini(at)proton(dot)me
 
 Thank you for your contribution! 🚀

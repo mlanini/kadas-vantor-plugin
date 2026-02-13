@@ -72,8 +72,8 @@ All notable changes to the KADAS Vantor Open Data Plugin.
 ---
 
 **Crediti**:
-- Basato su [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin) di Qiusheng Wu
-- Dati da [Vantor Open Data Program](https://www.maxar.com/open-data) (precedentemente Maxar)
-- Adattamento KADAS: Michael Lanini ([Intelligeo](https://www.intelligeo.ch))
+- Originally forked from [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin) by Qiusheng Wu
+- Data: [Vantor Open Data Program](https://vantor.com/company/open-data-program/) (former Maxar)
+- KADAS Refactoring: Michael Lanini
 
 **Licenza**: MIT
