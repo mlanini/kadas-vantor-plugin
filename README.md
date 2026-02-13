@@ -43,7 +43,7 @@ KADAS plugin to visualize and download high-resolution Vantor Open Data satellit
 
 ### From Git Repository
 ```bash
-cd %APPDATA%/kadas/python/plugins
+cd %APPDATA%/Kadas/Kadas/profiles/default/python/plugins
 git clone https://github.com/mlanini/kadas-vantor-plugin.git kadas_maxar
 ```
 
