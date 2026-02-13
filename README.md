@@ -43,13 +43,13 @@ KADAS plugin to visualize and download high-resolution Vantor Open Data satellit
 
 ### From Git Repository
 ```bash
-cd %APPDATA%/kadas-albireo2/python/plugins
+cd %APPDATA%/kadas/python/plugins
 git clone https://github.com/mlanini/kadas-vantor-plugin.git kadas_maxar
 ```
 
 ### Manual Installation
 1. Copy the `kadas_maxar` folder to:
-   - Windows: `%APPDATA%/kadas-albireo2/python/plugins/`
+   - Windows: `%APPDATA%/Kadas/Kadas/profiles/default/python/plugins/`
    - Linux: `~/.local/share/kadas-albireo2/python/plugins/`
    - macOS: `~/Library/Application Support/kadas-albireo2/python/plugins/`
 2. Restart KADAS
@@ -160,7 +160,7 @@ See [CHANGELOG.md](CHANGELOG.md) for complete change history.
 
 Based on [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin) by Qiusheng Wu.
 
-Adapted for KADAS by Michael Lanini.
+Refactored for [KADAS Albireo 2](https://github.com/kadas-albireo/kadas-albireo2) by Michael Lanini.
 
 Data provided by [Vantor Open Data Program](https://www.maxar.com/open-data) (formerly Maxar).
 
@@ -179,8 +179,3 @@ MIT License - see LICENSE file for details.
 
 _(To be added)_
 
-### Interactive Selection
-![Interactive Selection](docs/screenshots/selection_mode.png)
-
-### Applied Filters
-![Filters](docs/screenshots/filters.png)
